@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PDF Tools</string>
+    <string name="compress_pdf">Compress PDF</string>
+    <string name="merge_pdf">Merge PDF</string>
+    <string name="delete_pages">Delete Pages</string>
+    <string name="select_pdf">Select PDF File</string>
+    <string name="process">Process</string>
+    <string name="download">Download</string>
+    <string name="cancel">Cancel</string>
+    <string name="processing">Processing…</string>
+    <string name="success">Success!</string>
+    <string name="error">Error</string>
+    <string name="file_saved">File saved to Downloads</string>
+    <string name="select_multiple_pdf">Select Multiple PDF Files</string>
+    <string name="add_files">Add Files</string>
+    <string name="remove">Remove</string>
+    <string name="pages_to_delete">Pages to Delete (e.g., 1,3,5 or 2-4)</string>
+    <string name="total_pages">Total Pages: %d</string>
+    <string name="file_size">File Size: %s</string>
+    <string name="compression_level">Compression Level</string>
+    <string name="low">Low</string>
+    <string name="medium">Medium</string>
+    <string name="high">High</string>
+    <string name="no_files_selected">No files selected</string>
+    <string name="file_selected">%d file(s) selected</string>
+    <string name="confirm_delete">Confirm Delete</string>
+    <string name="are_you_sure">Are you sure you want to delete these pages?</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="output_filename">Output Filename</string>
+    <string name="enter_filename">Enter filename</string>
+    <string name="permission_required">Storage permission is required</string>
+    <string name="grant_permission">Grant Permission</string>
+    <string name="back">Back</string>
+    <string name="preview">Preview</string>
+    <string name="page">Page</string>
+    <string name="of">of</string>
+</resources>
