@@ -6,7 +6,6 @@ import com.aminmart.pdftools.data.PdfOperationResult
 import com.lowagie.text.Document
 import com.lowagie.text.pdf.PdfCopy
 import com.lowagie.text.pdf.PdfReader
-import com.lowagie.text.pdf.PdfWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -35,7 +34,7 @@ object PdfUtils {
     /**
      * Compress a PDF file
      * Note: OpenPDF has limited compression capabilities compared to iText
-     * This implementation removes unused objects and compresses streams
+     * This implementation uses PdfCopy which applies compression
      */
     suspend fun compressPdf(
         context: Context,
@@ -45,55 +44,37 @@ object PdfUtils {
     ): PdfOperationResult = withContext(Dispatchers.IO) {
         try {
             PdfOperationResult.Progress(10, "Reading PDF file...")
-            
+
             val reader = PdfReader(inputFile.absolutePath)
             val pageCount = reader.numberOfPages
-            
+
             PdfOperationResult.Progress(20, "Creating compressed document...")
-            
+
             // Create new document
             val document = Document()
-            val writer = PdfWriter(document, FileOutputStream(outputFile))
-            
-            // Apply compression settings based on level
-            when (compressionLevel) {
-                CompressionLevel.LOW -> {
-                    writer.fullCompression = true
-                }
-                CompressionLevel.MEDIUM -> {
-                    writer.fullCompression = true
-                    writer.setCompressionLevel(2)
-                }
-                CompressionLevel.HIGH -> {
-                    writer.fullCompression = true
-                    writer.setCompressionLevel(0)
-                }
-            }
-            
+            val copy = PdfCopy(document, FileOutputStream(outputFile))
+
             document.open()
-            
+
             PdfOperationResult.Progress(30, "Processing $pageCount pages...")
-            
-            val contentByte = arrayOfNulls<ByteArray>(pageCount)
-            
+
             // Copy pages with compression
             for (i in 1..pageCount) {
                 val percent = 30 + ((i.toFloat() / pageCount) * 50).toInt()
                 PdfOperationResult.Progress(percent, "Processing page $i of $pageCount...")
-                
-                document.newPage()
-                val page = writer.getImportedPage(reader, i)
-                writer.addImportedPage(page)
+
+                copy.addPage(copy.getImportedPage(reader, i))
             }
-            
+
             PdfOperationResult.Progress(85, "Finalizing document...")
-            
+
             document.close()
+            copy.close()
             reader.close()
-            
+
             // Clean up unused objects
             PdfOperationResult.Progress(90, "Optimizing...")
-            
+
             val originalSize = inputFile.length()
             val compressedSize = outputFile.length()
             val reduction = ((originalSize - compressedSize).toFloat() / originalSize * 100).toInt()
@@ -184,55 +165,54 @@ object PdfUtils {
     ): PdfOperationResult = withContext(Dispatchers.IO) {
         try {
             PdfOperationResult.Progress(10, "Reading PDF file...")
-            
+
             val reader = PdfReader(inputFile.absolutePath)
             val totalPages = reader.numberOfPages
-            
+
             // Validate pages to delete
             val validPagesToDelete = pagesToDelete
                 .filter { it in 1..totalPages }
                 .distinct()
                 .sorted()
-            
+
             val pagesToKeep = (1..totalPages).filter { it !in validPagesToDelete }
-            
+
             if (pagesToKeep.isEmpty()) {
                 reader.close()
                 return@withContext PdfOperationResult.Error("Cannot delete all pages")
             }
-            
+
             PdfOperationResult.Progress(30, "Creating new document...")
-            
+
             // Create new document
             val document = Document()
-            val writer = PdfWriter(document, FileOutputStream(outputFile))
-            
+            val copy = PdfCopy(document, FileOutputStream(outputFile))
+
             document.open()
-            
+
             PdfOperationResult.Progress(40, "Copying ${pagesToKeep.size} of $totalPages pages...")
-            
+
             pagesToKeep.forEachIndexed { index, pageNum ->
                 val percent = 40 + ((index.toFloat() / pagesToKeep.size) * 50).toInt()
                 PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pagesToKeep.size}...")
-                
-                document.newPage()
-                val page = writer.getImportedPage(reader, pageNum)
-                writer.addImportedPage(page)
+
+                copy.addPage(copy.getImportedPage(reader, pageNum))
             }
-            
+
             PdfOperationResult.Progress(90, "Finalizing document...")
-            
+
             document.close()
+            copy.close()
             reader.close()
-            
+
             val deletedCount = totalPages - pagesToKeep.size
             PdfOperationResult.Progress(
                 100,
                 "Successfully deleted $deletedCount page(s)"
             )
-            
+
             PdfOperationResult.Success(outputFile)
-            
+
         } catch (e: Exception) {
             outputFile.delete()
             PdfOperationResult.Error("Failed to delete pages: ${e.message}", e)
@@ -245,7 +225,7 @@ object PdfUtils {
      */
     fun parsePageRange(pageRange: String, totalPages: Int): List<Int> {
         val pages = mutableSetOf<Int>()
-        
+
         pageRange.split(",").forEach { part ->
             val trimmed = part.trim()
             if (trimmed.contains("-")) {
@@ -274,7 +254,70 @@ object PdfUtils {
                 }
             }
         }
-        
+
         return pages.sorted()
+    }
+
+    /**
+     * Reorder pages in a PDF file based on the specified page order
+     */
+    suspend fun reorderPages(
+        context: Context,
+        inputFile: File,
+        outputFile: File,
+        pageOrder: List<Int>
+    ): PdfOperationResult = withContext(Dispatchers.IO) {
+        try {
+            PdfOperationResult.Progress(10, "Reading PDF file...")
+
+            val reader = PdfReader(inputFile.absolutePath)
+            val totalPages = reader.numberOfPages
+
+            // Validate page order
+            if (pageOrder.isEmpty()) {
+                reader.close()
+                return@withContext PdfOperationResult.Error("Page order cannot be empty")
+            }
+
+            val invalidPages = pageOrder.filter { it !in 1..totalPages }
+            if (invalidPages.isNotEmpty()) {
+                reader.close()
+                return@withContext PdfOperationResult.Error("Invalid page numbers: ${invalidPages.joinToString(", ")}")
+            }
+
+            PdfOperationResult.Progress(30, "Creating new document...")
+
+            // Create new document
+            val document = Document()
+            val copy = PdfCopy(document, FileOutputStream(outputFile))
+
+            document.open()
+
+            PdfOperationResult.Progress(40, "Reordering ${pageOrder.size} pages...")
+
+            pageOrder.forEachIndexed { index, pageNum ->
+                val percent = 40 + ((index.toFloat() / pageOrder.size) * 50).toInt()
+                PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pageOrder.size}...")
+
+                copy.addPage(copy.getImportedPage(reader, pageNum))
+            }
+
+            PdfOperationResult.Progress(90, "Finalizing document...")
+
+            document.close()
+            copy.close()
+            reader.close()
+
+            PdfOperationResult.Progress(
+                100,
+                "Successfully reordered ${pageOrder.size} page(s)"
+            )
+
+            PdfOperationResult.Success(outputFile)
+
+        } catch (e: Exception) {
+            outputFile.delete()
+            PdfOperationResult.Error("Failed to reorder pages: ${e.message}", e)
+        }
     }
 }

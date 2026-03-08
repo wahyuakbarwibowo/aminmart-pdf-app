@@ -63,7 +63,7 @@ class MergePdfActivity : AppCompatActivity() {
 
     private fun setupRecyclerView() {
         adapter = PdfFileAdapter(mutableListOf()) { pdfFile ->
-            adapter.removeFile(pdfFile)
+            adapter.removeFile(pdfFile, this)
             updateFilesCount()
         }
         binding.filesRecyclerView.layoutManager = LinearLayoutManager(this)

@@ -4,6 +4,8 @@
     <string name="compress_pdf">Compress PDF</string>
     <string name="merge_pdf">Merge PDF</string>
     <string name="delete_pages">Delete Pages</string>
+    <string name="reorder_pages">Reorder Pages</string>
+    <string name="page_order">Page Order</string>
     <string name="select_pdf">Select PDF File</string>
     <string name="process">Process</string>
     <string name="download">Download</string>

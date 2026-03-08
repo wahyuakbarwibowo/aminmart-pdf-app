@@ -11,7 +11,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.aminmart.pdftools.data.PdfOperationResult
-import com.aminmart.pdftools.databinding.ActivityDeletePagesBinding
+import com.aminmart.pdftools.data.parsePageOrder
+import com.aminmart.pdftools.databinding.ActivityReorderPagesBinding
 import com.aminmart.pdftools.utils.FileUtils
 import com.aminmart.pdftools.utils.PdfUtils
 import kotlinx.coroutines.flow.Flow
@@ -19,9 +20,9 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import java.io.File
 
-class DeletePagesActivity : AppCompatActivity() {
+class ReorderPagesActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityDeletePagesBinding
+    private lateinit var binding: ActivityReorderPagesBinding
     private var selectedFile: File? = null
     private var outputFile: File? = null
     private var totalPages: Int = 0
@@ -33,12 +34,12 @@ class DeletePagesActivity : AppCompatActivity() {
             try {
                 selectedFile = FileUtils.copyUriToTempFile(this, it)
                 totalPages = PdfUtils.getPageCount(selectedFile!!)
-                
+
                 binding.selectedFileTextView.text = "${FileUtils.getFileNameFromUri(this, it) ?: "Unknown"}\n" +
                         "Size: ${FileUtils.formatFileSize(selectedFile!!.length())}"
                 binding.totalPagesTextView.text = "$totalPages pages"
-                binding.pagesToDeleteEditText.setText("")
-                binding.pagesPreviewTextView.text = ""
+                binding.pageOrderEditText.setText("")
+                binding.pageOrderPreviewTextView.text = ""
             } catch (e: Exception) {
                 Toast.makeText(this, "Error loading file: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -47,7 +48,7 @@ class DeletePagesActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityDeletePagesBinding.inflate(layoutInflater)
+        binding = ActivityReorderPagesBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         setupToolbar()
@@ -73,32 +74,55 @@ class DeletePagesActivity : AppCompatActivity() {
         binding.downloadButton.setOnClickListener {
             downloadFile()
         }
+
+        binding.reverseButton.setOnClickListener {
+            if (totalPages > 0) {
+                val reversedOrder = (totalPages downTo 1).joinToString(",")
+                binding.pageOrderEditText.setText(reversedOrder)
+            } else {
+                Toast.makeText(this, "Please select a PDF file first", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.clearButton.setOnClickListener {
+            binding.pageOrderEditText.setText("")
+        }
     }
 
     private fun setupTextWatcher() {
-        binding.pagesToDeleteEditText.addTextChangedListener(object : TextWatcher {
+        binding.pageOrderEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                updatePagesPreview()
+                updatePageOrderPreview()
             }
         })
     }
 
-    private fun updatePagesPreview() {
+    private fun updatePageOrderPreview() {
         if (totalPages == 0) return
 
-        val input = binding.pagesToDeleteEditText.text.toString()
+        val input = binding.pageOrderEditText.text.toString()
         if (input.isBlank()) {
-            binding.pagesPreviewTextView.text = ""
+            binding.pageOrderPreviewTextView.text = ""
             return
         }
 
-        val pagesToDelete = PdfUtils.parsePageRange(input, totalPages)
-        if (pagesToDelete.isNotEmpty()) {
-            binding.pagesPreviewTextView.text = "Will delete: ${pagesToDelete.size} page(s) - Pages: ${pagesToDelete.joinToString(", ")}"
+        val pages = parsePageOrder(input, totalPages)
+        if (pages.isNotEmpty()) {
+            val missingPages = (1..totalPages).filter { it !in pages }
+            val duplicateInfo = if (pages.size != pages.distinct().size) " (duplicates will be ignored)" else ""
+            
+            var previewText = "New order: ${pages.joinToString(", ")}$duplicateInfo"
+            if (missingPages.isNotEmpty()) {
+                previewText += "\nMissing pages: ${missingPages.joinToString(", ")}"
+            }
+            if (pages.size != totalPages) {
+                previewText += "\n⚠️ Page count mismatch (${pages.size} vs $totalPages)"
+            }
+            binding.pageOrderPreviewTextView.text = previewText
         } else {
-            binding.pagesPreviewTextView.text = "No valid pages specified"
+            binding.pageOrderPreviewTextView.text = "No valid page order specified"
         }
     }
 
@@ -109,34 +133,42 @@ class DeletePagesActivity : AppCompatActivity() {
             return
         }
 
-        val input = binding.pagesToDeleteEditText.text.toString()
+        val input = binding.pageOrderEditText.text.toString()
         if (input.isBlank()) {
-            Toast.makeText(this, "Please enter pages to delete", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Please enter page order", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val pagesToDelete = PdfUtils.parsePageRange(input, totalPages)
-        if (pagesToDelete.isEmpty()) {
+        val pages = parsePageOrder(input, totalPages)
+        if (pages.isEmpty()) {
             Toast.makeText(this, "Please enter valid page numbers", Toast.LENGTH_SHORT).show()
             return
         }
 
-        if (pagesToDelete.size >= totalPages) {
-            Toast.makeText(this, "Cannot delete all pages", Toast.LENGTH_SHORT).show()
+        val missingPages = (1..totalPages).filter { it !in pages }
+        if (missingPages.isNotEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Missing Pages")
+                .setMessage("The following pages are not included in the new order: ${missingPages.joinToString(", ")}\n\nThese pages will be lost in the output file. Continue?")
+                .setPositiveButton("Continue") { _, _ ->
+                    processReorderPages(pages)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
             return
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Confirm Delete")
-            .setMessage("Are you sure you want to delete ${pagesToDelete.size} page(s) from this PDF?\n\nPages to delete: ${pagesToDelete.joinToString(", ")}")
-            .setPositiveButton("Delete") { _, _ ->
-                processDeletePages(pagesToDelete)
+            .setTitle("Confirm Reorder")
+            .setMessage("Are you sure you want to reorder the pages?\n\nNew order: ${pages.joinToString(", ")}")
+            .setPositiveButton("Reorder") { _, _ ->
+                processReorderPages(pages)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun processDeletePages(pagesToDelete: List<Int>) {
+    private fun processReorderPages(pageOrder: List<Int>) {
         val file = selectedFile ?: return
 
         val filename = binding.filenameEditText.text.toString().trim()
@@ -148,7 +180,7 @@ class DeletePagesActivity : AppCompatActivity() {
         showProgress(true)
 
         lifecycleScope.launch {
-            deletePagesFlow(file, outputFile!!, pagesToDelete).collect { result ->
+            reorderPagesFlow(file, outputFile!!, pageOrder).collect { result ->
                 when (result) {
                     is PdfOperationResult.Progress -> {
                         binding.progressBar.progress = result.percent
@@ -158,15 +190,15 @@ class DeletePagesActivity : AppCompatActivity() {
                         showProgress(false)
                         showDownloadButton()
                         Toast.makeText(
-                            this@DeletePagesActivity,
-                            "Successfully deleted ${pagesToDelete.size} page(s)",
+                            this@ReorderPagesActivity,
+                            "Successfully reordered ${pageOrder.size} page(s)",
                             Toast.LENGTH_SHORT
                         ).show()
                     }
                     is PdfOperationResult.Error -> {
                         showProgress(false)
                         Toast.makeText(
-                            this@DeletePagesActivity,
+                            this@ReorderPagesActivity,
                             result.message,
                             Toast.LENGTH_LONG
                         ).show()
@@ -176,23 +208,23 @@ class DeletePagesActivity : AppCompatActivity() {
         }
     }
 
-    private fun deletePagesFlow(inputFile: File, outputFile: File, pagesToDelete: List<Int>): Flow<PdfOperationResult> = flow {
+    private fun reorderPagesFlow(inputFile: File, outputFile: File, pageOrder: List<Int>): Flow<PdfOperationResult> = flow {
         try {
             emit(PdfOperationResult.Progress(10, "Reading PDF file..."))
 
             val reader = com.lowagie.text.pdf.PdfReader(inputFile.absolutePath)
             val totalPages = reader.numberOfPages
 
-            val validPagesToDelete = pagesToDelete
-                .filter { it in 1..totalPages }
-                .distinct()
-                .sorted()
-
-            val pagesToKeep = (1..totalPages).filter { it !in validPagesToDelete }
-
-            if (pagesToKeep.isEmpty()) {
+            if (pageOrder.isEmpty()) {
                 reader.close()
-                emit(PdfOperationResult.Error("Cannot delete all pages"))
+                emit(PdfOperationResult.Error("Page order cannot be empty"))
+                return@flow
+            }
+
+            val invalidPages = pageOrder.filter { it !in 1..totalPages }
+            if (invalidPages.isNotEmpty()) {
+                reader.close()
+                emit(PdfOperationResult.Error("Invalid page numbers: ${invalidPages.joinToString(", ")}"))
                 return@flow
             }
 
@@ -203,11 +235,11 @@ class DeletePagesActivity : AppCompatActivity() {
 
             document.open()
 
-            emit(PdfOperationResult.Progress(40, "Copying ${pagesToKeep.size} of $totalPages pages..."))
+            emit(PdfOperationResult.Progress(40, "Reordering ${pageOrder.size} pages..."))
 
-            pagesToKeep.forEachIndexed { index, pageNum ->
-                val percent = 40 + ((index.toFloat() / pagesToKeep.size) * 50).toInt()
-                emit(PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pagesToKeep.size}..."))
+            pageOrder.forEachIndexed { index, pageNum ->
+                val percent = 40 + ((index.toFloat() / pageOrder.size) * 50).toInt()
+                emit(PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pageOrder.size}..."))
 
                 copy.addPage(copy.getImportedPage(reader, pageNum))
             }
@@ -217,18 +249,17 @@ class DeletePagesActivity : AppCompatActivity() {
             document.close()
             copy.close()
             reader.close()
-            
-            val deletedCount = totalPages - pagesToKeep.size
+
             emit(PdfOperationResult.Progress(
                 100,
-                "Successfully deleted $deletedCount page(s)"
+                "Successfully reordered ${pageOrder.size} page(s)"
             ))
-            
+
             emit(PdfOperationResult.Success(outputFile))
-            
+
         } catch (e: Exception) {
             outputFile.delete()
-            emit(PdfOperationResult.Error("Failed to delete pages: ${e.message}", e))
+            emit(PdfOperationResult.Error("Failed to reorder pages: ${e.message}", e))
         }
     }
 
@@ -236,7 +267,9 @@ class DeletePagesActivity : AppCompatActivity() {
         binding.progressLayout.visibility = if (show) View.VISIBLE else View.GONE
         binding.processButton.isEnabled = !show
         binding.selectFileButton.isEnabled = !show
-        binding.pagesToDeleteEditText.isEnabled = !show
+        binding.pageOrderEditText.isEnabled = !show
+        binding.reverseButton.isEnabled = !show
+        binding.clearButton.isEnabled = !show
     }
 
     private fun showDownloadButton() {

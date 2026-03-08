@@ -130,58 +130,43 @@ class CompressPdfActivity : AppCompatActivity() {
     ): Flow<PdfOperationResult> = flow {
         try {
             emit(PdfOperationResult.Progress(10, "Reading PDF file..."))
-            
+
             val reader = com.lowagie.text.pdf.PdfReader(inputFile.absolutePath)
             val pageCount = reader.numberOfPages
-            
+
             emit(PdfOperationResult.Progress(20, "Creating compressed document..."))
-            
+
             val document = com.lowagie.text.Document()
-            val writer = com.lowagie.text.pdf.PdfWriter(document, java.io.FileOutputStream(outputFile))
-            
-            when (compressionLevel) {
-                CompressionLevel.LOW -> {
-                    writer.fullCompression = true
-                }
-                CompressionLevel.MEDIUM -> {
-                    writer.fullCompression = true
-                    writer.setCompressionLevel(2)
-                }
-                CompressionLevel.HIGH -> {
-                    writer.fullCompression = true
-                    writer.setCompressionLevel(0)
-                }
-            }
-            
+            val copy = com.lowagie.text.pdf.PdfCopy(document, java.io.FileOutputStream(outputFile))
+
             document.open()
-            
+
             emit(PdfOperationResult.Progress(30, "Processing $pageCount pages..."))
-            
+
             for (i in 1..pageCount) {
                 val percent = 30 + ((i.toFloat() / pageCount) * 50).toInt()
                 emit(PdfOperationResult.Progress(percent, "Processing page $i of $pageCount..."))
-                
-                document.newPage()
-                val page = writer.getImportedPage(reader, i)
-                writer.addImportedPage(page)
+
+                copy.addPage(copy.getImportedPage(reader, i))
             }
-            
+
             emit(PdfOperationResult.Progress(85, "Finalizing document..."))
-            
+
             document.close()
+            copy.close()
             reader.close()
-            
+
             val originalSize = inputFile.length()
             val compressedSize = outputFile.length()
             val reduction = ((originalSize - compressedSize).toFloat() / originalSize * 100).toInt()
-            
+
             emit(PdfOperationResult.Progress(
                 100,
                 "Compression complete! Reduced by $reduction%"
             ))
-            
+
             emit(PdfOperationResult.Success(outputFile))
-            
+
         } catch (e: Exception) {
             outputFile.delete()
             emit(PdfOperationResult.Error("Failed to compress PDF: ${e.message}", e))

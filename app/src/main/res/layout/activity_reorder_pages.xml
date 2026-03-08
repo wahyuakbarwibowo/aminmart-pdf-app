@@ -12,7 +12,7 @@
         android:layout_width="0dp"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/primary"
-        app:title="@string/delete_pages"
+        app:title="@string/reorder_pages"
         app:titleTextColor="@color/white"
         app:navigationIcon="@android:drawable/ic_menu_revert"
         app:layout_constraintEnd_toEndOf="parent"
@@ -108,9 +108,9 @@
 
     </androidx.cardview.widget.CardView>
 
-    <!-- Pages to delete card -->
+    <!-- Page order card -->
     <androidx.cardview.widget.CardView
-        android:id="@+id/pagesToDeleteCard"
+        android:id="@+id/pageOrderCard"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_margin="16dp"
@@ -130,7 +130,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/pages_to_delete"
+                android:text="@string/page_order"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:textColor="@color/text_primary" />
@@ -139,11 +139,11 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="e.g., 1,3,5 or 2-4"
+                android:hint="e.g., 3,2,1 or 5-1 or 1,3,2,4,5"
                 style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
                 <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/pagesToDeleteEditText"
+                    android:id="@+id/pageOrderEditText"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:inputType="text" />
@@ -154,19 +154,46 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Examples: 1,3,5 deletes pages 1, 3, and 5. 2-4 deletes pages 2, 3, and 4. 1,3-5,8 deletes pages 1, 3, 4, 5, and 8."
+                android:text="Examples: &quot;3,2,1&quot; reverses first 3 pages. &quot;5-1&quot; reverses all 5 pages. &quot;1,3,2,4,5&quot; swaps pages 2 and 3."
                 android:textSize="12sp"
                 android:textColor="@color/text_secondary" />
 
             <TextView
-                android:id="@+id/pagesPreviewTextView"
+                android:id="@+id/pageOrderPreviewTextView"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:textSize="14sp"
                 android:textStyle="bold"
                 android:textColor="@color/accent"
-                tools:text="Will delete: 5 pages" />
+                tools:text="New order: 3, 2, 1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/reverseButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Reverse All"
+                    android:textSize="12sp"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/clearButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Clear"
+                    android:textSize="12sp"
+                    style="@style/Widget.Material3.Button.OutlinedButton" />
+
+            </LinearLayout>
 
         </LinearLayout>
 
@@ -183,7 +210,7 @@
         app:cardBackgroundColor="@color/card_background"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/pagesToDeleteCard">
+        app:layout_constraintTop_toBottomOf="@id/pageOrderCard">
 
         <LinearLayout
             android:layout_width="match_parent"

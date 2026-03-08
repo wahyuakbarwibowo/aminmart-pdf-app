@@ -68,9 +68,11 @@ object FileUtils {
      * Create output file with given name
      */
     fun createOutputFile(context: Context, filename: String): File {
-        val cleanFilename = filename
-            .replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            .ensureSuffix(".pdf")
+        val cleanFilename = if (filename.endsWith(".pdf", ignoreCase = true)) {
+            filename.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        } else {
+            "${filename.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.pdf"
+        }
         return File(getDownloadDir(context), cleanFilename)
     }
 
