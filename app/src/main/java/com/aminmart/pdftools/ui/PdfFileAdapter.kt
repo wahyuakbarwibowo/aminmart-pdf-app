@@ -18,7 +18,7 @@ class PdfFileAdapter(
         fun bind(pdfFile: PdfFile) {
             binding.filenameTextView.text = pdfFile.name
             binding.fileInfoTextView.text = "${pdfFile.getFormattedSize()} • ${pdfFile.pageCount} pages"
-            
+
             binding.removeButton.setOnClickListener {
                 onRemoveClick(pdfFile)
             }
@@ -45,13 +45,13 @@ class PdfFileAdapter(
         notifyItemInserted(files.size - 1)
     }
 
-    fun removeFile(pdfFile: PdfFile) {
+    fun removeFile(pdfFile: PdfFile, context: android.content.Context) {
         val index = files.indexOfFirst { it.id == pdfFile.id }
         if (index != -1) {
             files.removeAt(index)
             notifyItemRemoved(index)
             // Delete the temp file
-            FileUtils.deleteTempFile(binding.root.context, pdfFile.file)
+            FileUtils.deleteTempFile(context, pdfFile.file)
         }
     }
 

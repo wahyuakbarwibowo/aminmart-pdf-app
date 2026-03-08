@@ -60,6 +60,13 @@
             android:parentActivityName=".ui.MainActivity"
             android:theme="@style/Theme.PDFTools" />
 
+        <!-- Reorder Pages Activity -->
+        <activity
+            android:name=".ui.ReorderPagesActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.MainActivity"
+            android:theme="@style/Theme.PDFTools" />
+
         <!-- FileProvider for sharing files -->
         <provider
             android:name="androidx.core.content.FileProvider"

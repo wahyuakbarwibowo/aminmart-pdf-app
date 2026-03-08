@@ -56,6 +56,10 @@ class MainActivity : AppCompatActivity() {
         binding.deletePagesCard.setOnClickListener {
             startActivity(Intent(this, DeletePagesActivity::class.java))
         }
+
+        binding.reorderPagesCard.setOnClickListener {
+            startActivity(Intent(this, ReorderPagesActivity::class.java))
+        }
     }
 
     private fun checkManageStoragePermission() {
