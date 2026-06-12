@@ -7,6 +7,7 @@ A Kotlin Android application for PDF manipulation operations including compress,
 - **Compress PDF**: Reduce PDF file size with adjustable compression levels (Low, Medium, High)
 - **Merge PDF**: Combine multiple PDF files into a single document
 - **Delete Pages**: Remove specific pages from a PDF file using page numbers or ranges
+- **Reorder Pages**: Rearrange pages using a custom order, including reverse ranges like `5-1`
 
 ## Technical Details
 
@@ -33,6 +34,8 @@ app/
 │   │       ├── CompressPdfActivity.kt   # Compress feature
 │   │       ├── MergePdfActivity.kt      # Merge feature
 │   │       ├── DeletePagesActivity.kt   # Delete pages feature
+│   │       ├── ReorderPagesActivity.kt  # Reorder pages feature
+│   │       ├── PdfToolViewModel.kt      # Shared ViewModel (survives rotation)
 │   │       └── PdfFileAdapter.kt        # RecyclerView adapter
 │   ├── res/
 │   │   ├── layout/              # UI layouts
@@ -48,16 +51,14 @@ app/
 The app follows a strict temporary file policy:
 
 1. **Input files** are copied to the app's cache directory (`cache/pdf_temp/`)
-2. **Output files** are saved to the app's external files directory (`Android/data/com.aminmart.pdftools/files/PDF Tools/`)
-3. **Automatic cleanup**: Temporary files are deleted when:
-   - The activity is destroyed (`onDestroy()`)
-   - After the user downloads/opens the processed file
+2. **Output files** are saved to the app's external files directory (`Android/data/com.aminmart.pdftools/files/PDF Tools/`); on Android 10+ the Download button also publishes a copy to the system Downloads folder via MediaStore
+3. **Automatic cleanup**: Temporary files are deleted when the user leaves a feature screen (the ViewModel is cleared)
 
 ## Permissions
 
-- `READ_EXTERNAL_STORAGE` / `READ_MEDIA_*` (Android 13+): Select PDF files
-- `WRITE_EXTERNAL_STORAGE`: Save processed files (Android 12 and below)
-- `MANAGE_EXTERNAL_STORAGE`: Broad file access (Android 11+)
+None. Input files are selected through the system file picker (Storage Access
+Framework) and outputs are written to app-specific storage or published via
+MediaStore, neither of which requires a runtime permission.
 
 ## Building the App
 
