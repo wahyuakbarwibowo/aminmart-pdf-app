@@ -36,8 +36,10 @@ Three layers under `app/src/main/java/com/aminmart/pdftools/`:
 - `utils/FileUtils.kt` — temp/output file management. `data/Models.kt` holds `PdfFile`, `CompressionLevel`, the `PdfOperationResult` sealed class, and `parsePageOrder` (the ordered/reversible variant of `PdfUtils.parsePageRange`).
 
 Gotchas:
-- The `PdfOperationResult.Progress(...)` expressions sprinkled through `PdfUtils` are created and immediately discarded — nothing collects them. Only the final return value reaches the UI; don't assume progress reporting works.
+- The big PDF operations in `PdfUtils` (`compressPdf`, `mergePdfs`, `deletePages`, `reorderPages`) are dead code: each Activity reimplements the same logic inline as a private `Flow` (e.g. `compressPdfWithProgress`) to get progress updates. The `PdfOperationResult.Progress(...)` expressions inside `PdfUtils` are created and discarded — nothing collects them. Fix bugs in the Activity flows, not (only) in `PdfUtils`.
+- The Activity flows have no `flowOn(Dispatchers.IO)`, so PDF processing runs on the main thread.
 - Compression is nominal: OpenPDF's `PdfCopy` applies only its default compression, and `CompressionLevel` is not actually used to vary it.
+- No test sources exist (`app/src/test/` and `app/src/androidTest/` are absent) despite test dependencies being declared.
 
 ## File lifecycle (strict temp-file policy)
 
