@@ -1,24 +1,28 @@
 package com.aminmart.pdftools.utils
 
-import android.content.Context
 import com.aminmart.pdftools.data.CompressionLevel
 import com.aminmart.pdftools.data.PdfOperationResult
 import com.lowagie.text.Document
 import com.lowagie.text.pdf.PdfCopy
 import com.lowagie.text.pdf.PdfReader
+import com.lowagie.text.pdf.PdfStamper
+import com.lowagie.text.pdf.PdfWriter
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
 
 /**
- * Utility class for PDF operations using OpenPDF library
+ * Utility class for PDF operations using OpenPDF library.
+ * All operations are cold flows that run on Dispatchers.IO and emit
+ * Progress updates followed by a terminal Success or Error.
  */
 object PdfUtils {
 
     /**
-     * Get the number of pages in a PDF file
+     * Get the number of pages in a PDF file, or -1 if the file is not a readable PDF
      */
     fun getPageCount(file: File): Int {
         return try {
@@ -32,139 +36,122 @@ object PdfUtils {
     }
 
     /**
-     * Compress a PDF file
-     * Note: OpenPDF has limited compression capabilities compared to iText
-     * This implementation uses PdfCopy which applies compression
+     * Compress a PDF file by removing unused objects and rewriting all
+     * streams with the requested deflate level and a compressed xref (PDF 1.5).
      */
-    suspend fun compressPdf(
-        context: Context,
+    fun compressPdf(
         inputFile: File,
         outputFile: File,
         compressionLevel: CompressionLevel
-    ): PdfOperationResult = withContext(Dispatchers.IO) {
+    ): Flow<PdfOperationResult> = flow {
         try {
-            PdfOperationResult.Progress(10, "Reading PDF file...")
+            emit(PdfOperationResult.Progress(10, "Reading PDF file..."))
 
             val reader = PdfReader(inputFile.absolutePath)
-            val pageCount = reader.numberOfPages
 
-            PdfOperationResult.Progress(20, "Creating compressed document...")
+            emit(PdfOperationResult.Progress(30, "Removing unused objects..."))
+            reader.removeUnusedObjects()
 
-            // Create new document
-            val document = Document()
-            val copy = PdfCopy(document, FileOutputStream(outputFile))
+            emit(PdfOperationResult.Progress(50, "Rewriting with compression..."))
 
-            document.open()
+            val stamper = PdfStamper(reader, FileOutputStream(outputFile), PdfWriter.VERSION_1_5)
+            stamper.setFullCompression()
+            stamper.writer.setCompressionLevel(
+                when (compressionLevel) {
+                    CompressionLevel.LOW -> 3
+                    CompressionLevel.MEDIUM -> 6
+                    CompressionLevel.HIGH -> 9
+                }
+            )
 
-            PdfOperationResult.Progress(30, "Processing $pageCount pages...")
+            emit(PdfOperationResult.Progress(80, "Finalizing document..."))
 
-            // Copy pages with compression
-            for (i in 1..pageCount) {
-                val percent = 30 + ((i.toFloat() / pageCount) * 50).toInt()
-                PdfOperationResult.Progress(percent, "Processing page $i of $pageCount...")
-
-                copy.addPage(copy.getImportedPage(reader, i))
-            }
-
-            PdfOperationResult.Progress(85, "Finalizing document...")
-
-            document.close()
-            copy.close()
+            stamper.close()
             reader.close()
-
-            // Clean up unused objects
-            PdfOperationResult.Progress(90, "Optimizing...")
 
             val originalSize = inputFile.length()
             val compressedSize = outputFile.length()
             val reduction = ((originalSize - compressedSize).toFloat() / originalSize * 100).toInt()
-            
-            PdfOperationResult.Progress(
-                100,
+
+            val message = if (reduction > 0) {
                 "Compression complete! Reduced by $reduction%"
-            )
-            
-            PdfOperationResult.Success(outputFile)
-            
+            } else {
+                "Compression complete! File was already optimized"
+            }
+            emit(PdfOperationResult.Progress(100, message))
+
+            emit(PdfOperationResult.Success(outputFile))
+
         } catch (e: Exception) {
             outputFile.delete()
-            PdfOperationResult.Error("Failed to compress PDF: ${e.message}", e)
+            emit(PdfOperationResult.Error("Failed to compress PDF: ${e.message}", e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Merge multiple PDF files into one
      */
-    suspend fun mergePdfs(
-        context: Context,
+    fun mergePdfs(
         inputFiles: List<File>,
         outputFile: File
-    ): PdfOperationResult = withContext(Dispatchers.IO) {
+    ): Flow<PdfOperationResult> = flow {
         try {
             if (inputFiles.isEmpty()) {
-                return@withContext PdfOperationResult.Error("No files to merge")
+                emit(PdfOperationResult.Error("No files to merge"))
+                return@flow
             }
 
-            PdfOperationResult.Progress(10, "Starting merge process...")
-            
-            // Create document based on first file
+            emit(PdfOperationResult.Progress(5, "Starting merge process..."))
+
             val firstReader = PdfReader(inputFiles[0].absolutePath)
             val document = Document(firstReader.getPageSizeWithRotation(1))
+            firstReader.close()
+
             val copy = PdfCopy(document, FileOutputStream(outputFile))
-            
             document.open()
-            
-            var totalPages = 0
-            inputFiles.forEach { totalPages += getPageCount(it) }
-            
+
+            val totalPages = inputFiles.sumOf { getPageCount(it).coerceAtLeast(0) }
             var currentPage = 0
-            
-            inputFiles.forEachIndexed { fileIndex, file ->
-                PdfOperationResult.Progress(
-                    20 + (fileIndex * 40 / inputFiles.size),
-                    "Processing file ${fileIndex + 1} of ${inputFiles.size}..."
-                )
-                
+
+            inputFiles.forEach { file ->
                 val reader = PdfReader(file.absolutePath)
-                val n = reader.numberOfPages
-                
-                for (i in 1..n) {
+
+                for (i in 1..reader.numberOfPages) {
                     currentPage++
-                    val percent = 60 + (currentPage * 35 / totalPages)
-                    PdfOperationResult.Progress(percent, "Copying page $currentPage of $totalPages...")
-                    
+                    val percent = 5 + (currentPage * 90 / totalPages.coerceAtLeast(1))
+                    emit(PdfOperationResult.Progress(percent, "Copying page $currentPage of $totalPages..."))
+
                     copy.addPage(copy.getImportedPage(reader, i))
                 }
-                
+
                 reader.close()
             }
-            
-            PdfOperationResult.Progress(95, "Finalizing merged document...")
-            
+
+            emit(PdfOperationResult.Progress(95, "Finalizing merged document..."))
+
             document.close()
             copy.close()
-            
-            PdfOperationResult.Progress(100, "Merge complete!")
-            
-            PdfOperationResult.Success(outputFile)
-            
+
+            emit(PdfOperationResult.Progress(100, "Merge complete!"))
+
+            emit(PdfOperationResult.Success(outputFile))
+
         } catch (e: Exception) {
             outputFile.delete()
-            PdfOperationResult.Error("Failed to merge PDFs: ${e.message}", e)
+            emit(PdfOperationResult.Error("Failed to merge PDFs: ${e.message}", e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Delete specific pages from a PDF file
      */
-    suspend fun deletePages(
-        context: Context,
+    fun deletePages(
         inputFile: File,
         outputFile: File,
         pagesToDelete: List<Int>
-    ): PdfOperationResult = withContext(Dispatchers.IO) {
+    ): Flow<PdfOperationResult> = flow {
         try {
-            PdfOperationResult.Progress(10, "Reading PDF file...")
+            emit(PdfOperationResult.Progress(10, "Reading PDF file..."))
 
             val reader = PdfReader(inputFile.absolutePath)
             val totalPages = reader.numberOfPages
@@ -179,45 +166,101 @@ object PdfUtils {
 
             if (pagesToKeep.isEmpty()) {
                 reader.close()
-                return@withContext PdfOperationResult.Error("Cannot delete all pages")
+                emit(PdfOperationResult.Error("Cannot delete all pages"))
+                return@flow
             }
 
-            PdfOperationResult.Progress(30, "Creating new document...")
+            emit(PdfOperationResult.Progress(30, "Creating new document..."))
 
-            // Create new document
             val document = Document()
             val copy = PdfCopy(document, FileOutputStream(outputFile))
 
             document.open()
 
-            PdfOperationResult.Progress(40, "Copying ${pagesToKeep.size} of $totalPages pages...")
+            emit(PdfOperationResult.Progress(40, "Copying ${pagesToKeep.size} of $totalPages pages..."))
 
             pagesToKeep.forEachIndexed { index, pageNum ->
                 val percent = 40 + ((index.toFloat() / pagesToKeep.size) * 50).toInt()
-                PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pagesToKeep.size}...")
+                emit(PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pagesToKeep.size}..."))
 
                 copy.addPage(copy.getImportedPage(reader, pageNum))
             }
 
-            PdfOperationResult.Progress(90, "Finalizing document...")
+            emit(PdfOperationResult.Progress(90, "Finalizing document..."))
 
             document.close()
             copy.close()
             reader.close()
 
             val deletedCount = totalPages - pagesToKeep.size
-            PdfOperationResult.Progress(
-                100,
-                "Successfully deleted $deletedCount page(s)"
-            )
+            emit(PdfOperationResult.Progress(100, "Successfully deleted $deletedCount page(s)"))
 
-            PdfOperationResult.Success(outputFile)
+            emit(PdfOperationResult.Success(outputFile))
 
         } catch (e: Exception) {
             outputFile.delete()
-            PdfOperationResult.Error("Failed to delete pages: ${e.message}", e)
+            emit(PdfOperationResult.Error("Failed to delete pages: ${e.message}", e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Reorder pages in a PDF file based on the specified page order
+     */
+    fun reorderPages(
+        inputFile: File,
+        outputFile: File,
+        pageOrder: List<Int>
+    ): Flow<PdfOperationResult> = flow {
+        try {
+            emit(PdfOperationResult.Progress(10, "Reading PDF file..."))
+
+            val reader = PdfReader(inputFile.absolutePath)
+            val totalPages = reader.numberOfPages
+
+            if (pageOrder.isEmpty()) {
+                reader.close()
+                emit(PdfOperationResult.Error("Page order cannot be empty"))
+                return@flow
+            }
+
+            val invalidPages = pageOrder.filter { it !in 1..totalPages }
+            if (invalidPages.isNotEmpty()) {
+                reader.close()
+                emit(PdfOperationResult.Error("Invalid page numbers: ${invalidPages.joinToString(", ")}"))
+                return@flow
+            }
+
+            emit(PdfOperationResult.Progress(30, "Creating new document..."))
+
+            val document = Document()
+            val copy = PdfCopy(document, FileOutputStream(outputFile))
+
+            document.open()
+
+            emit(PdfOperationResult.Progress(40, "Reordering ${pageOrder.size} pages..."))
+
+            pageOrder.forEachIndexed { index, pageNum ->
+                val percent = 40 + ((index.toFloat() / pageOrder.size) * 50).toInt()
+                emit(PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pageOrder.size}..."))
+
+                copy.addPage(copy.getImportedPage(reader, pageNum))
+            }
+
+            emit(PdfOperationResult.Progress(90, "Finalizing document..."))
+
+            document.close()
+            copy.close()
+            reader.close()
+
+            emit(PdfOperationResult.Progress(100, "Successfully reordered ${pageOrder.size} page(s)"))
+
+            emit(PdfOperationResult.Success(outputFile))
+
+        } catch (e: Exception) {
+            outputFile.delete()
+            emit(PdfOperationResult.Error("Failed to reorder pages: ${e.message}", e))
+        }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * Parse page range string to list of page numbers
@@ -256,68 +299,5 @@ object PdfUtils {
         }
 
         return pages.sorted()
-    }
-
-    /**
-     * Reorder pages in a PDF file based on the specified page order
-     */
-    suspend fun reorderPages(
-        context: Context,
-        inputFile: File,
-        outputFile: File,
-        pageOrder: List<Int>
-    ): PdfOperationResult = withContext(Dispatchers.IO) {
-        try {
-            PdfOperationResult.Progress(10, "Reading PDF file...")
-
-            val reader = PdfReader(inputFile.absolutePath)
-            val totalPages = reader.numberOfPages
-
-            // Validate page order
-            if (pageOrder.isEmpty()) {
-                reader.close()
-                return@withContext PdfOperationResult.Error("Page order cannot be empty")
-            }
-
-            val invalidPages = pageOrder.filter { it !in 1..totalPages }
-            if (invalidPages.isNotEmpty()) {
-                reader.close()
-                return@withContext PdfOperationResult.Error("Invalid page numbers: ${invalidPages.joinToString(", ")}")
-            }
-
-            PdfOperationResult.Progress(30, "Creating new document...")
-
-            // Create new document
-            val document = Document()
-            val copy = PdfCopy(document, FileOutputStream(outputFile))
-
-            document.open()
-
-            PdfOperationResult.Progress(40, "Reordering ${pageOrder.size} pages...")
-
-            pageOrder.forEachIndexed { index, pageNum ->
-                val percent = 40 + ((index.toFloat() / pageOrder.size) * 50).toInt()
-                PdfOperationResult.Progress(percent, "Copying page ${index + 1} of ${pageOrder.size}...")
-
-                copy.addPage(copy.getImportedPage(reader, pageNum))
-            }
-
-            PdfOperationResult.Progress(90, "Finalizing document...")
-
-            document.close()
-            copy.close()
-            reader.close()
-
-            PdfOperationResult.Progress(
-                100,
-                "Successfully reordered ${pageOrder.size} page(s)"
-            )
-
-            PdfOperationResult.Success(outputFile)
-
-        } catch (e: Exception) {
-            outputFile.delete()
-            PdfOperationResult.Error("Failed to reorder pages: ${e.message}", e)
-        }
     }
 }

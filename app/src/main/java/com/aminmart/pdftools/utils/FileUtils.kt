@@ -1,7 +1,10 @@
 package com.aminmart.pdftools.utils
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
 import com.aminmart.pdftools.data.PdfFile
 import java.io.File
@@ -124,6 +127,40 @@ object FileUtils {
                 "${format.format(size / (1024.0 * 1024.0))} MB"
             }
         }
+    }
+
+    /**
+     * Copy a file into the public Downloads collection via MediaStore so the
+     * user can find it in any file manager. Returns the new content Uri, or
+     * null on Android 9 and below where the app's external files dir is
+     * already accessible and MediaStore.Downloads does not exist.
+     */
+    fun saveToDownloads(context: Context, file: File): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, file.name)
+            put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+
+        try {
+            resolver.openOutputStream(uri)?.use { outputStream ->
+                FileInputStream(file).use { it.copyTo(outputStream) }
+            } ?: throw IOException("Cannot open output stream for $uri")
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            return null
+        }
+
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+
+        return uri
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.aminmart.pdftools.data
 
+import com.aminmart.pdftools.utils.FileUtils
 import java.io.File
 
 /**
@@ -13,13 +14,7 @@ data class PdfFile(
     val pageCount: Int = 0,
     val isSelected: Boolean = false
 ) {
-    fun getFormattedSize(): String {
-        return when {
-            size < 1024 -> "$size B"
-            size < 1024 * 1024 -> "${size / 1024} KB"
-            else -> String.format("%.2f MB", size / (1024.0 * 1024.0))
-        }
-    }
+    fun getFormattedSize(): String = FileUtils.formatFileSize(size)
 }
 
 /**
@@ -56,8 +51,8 @@ fun parsePageOrder(pageOrder: String, totalPages: Int): List<Int> {
                 try {
                     val start = range[0].trim().toInt()
                     val end = range[1].trim().toInt()
-                    val step = if (start <= end) 1 else -1
-                    for (i in start..end step step) {
+                    val progression = if (start <= end) start..end else start downTo end
+                    for (i in progression) {
                         if (i in 1..totalPages && i !in addedPages) {
                             pages.add(i)
                             addedPages.add(i)

@@ -1,28 +1,27 @@
 package com.aminmart.pdftools.ui
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.aminmart.pdftools.R
 import com.aminmart.pdftools.data.PdfFile
 import com.aminmart.pdftools.data.PdfOperationResult
 import com.aminmart.pdftools.databinding.ActivityMergePdfBinding
 import com.aminmart.pdftools.utils.FileUtils
 import com.aminmart.pdftools.utils.PdfUtils
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
-import java.io.File
 
 class MergePdfActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMergePdfBinding
     private lateinit var adapter: PdfFileAdapter
-    private var outputFile: File? = null
+    private val viewModel: PdfToolViewModel by viewModels()
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetMultipleContents()
@@ -31,6 +30,11 @@ class MergePdfActivity : AppCompatActivity() {
             try {
                 val tempFile = FileUtils.copyUriToTempFile(this, uri)
                 val pageCount = PdfUtils.getPageCount(tempFile)
+                if (pageCount <= 0) {
+                    FileUtils.deleteTempFile(this, tempFile)
+                    Toast.makeText(this, "Skipped invalid PDF", Toast.LENGTH_SHORT).show()
+                    return@forEach
+                }
                 val pdfFile = PdfFile(
                     file = tempFile,
                     name = FileUtils.getFileNameFromUri(this, uri) ?: tempFile.name,
@@ -53,6 +57,8 @@ class MergePdfActivity : AppCompatActivity() {
         setupToolbar()
         setupRecyclerView()
         setupClickListeners()
+        updateFilesCount()
+        observeOperation()
     }
 
     private fun setupToolbar() {
@@ -62,7 +68,8 @@ class MergePdfActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = PdfFileAdapter(mutableListOf()) { pdfFile ->
+        // Adapter is backed by the ViewModel's list so the selection survives rotation
+        adapter = PdfFileAdapter(viewModel.mergeFiles) { pdfFile ->
             adapter.removeFile(pdfFile, this)
             updateFilesCount()
         }
@@ -87,9 +94,9 @@ class MergePdfActivity : AppCompatActivity() {
     private fun updateFilesCount() {
         val count = adapter.itemCount
         binding.filesCountTextView.text = if (count == 0) {
-            getString(com.aminmart.pdftools.R.string.no_files_selected)
+            getString(R.string.no_files_selected)
         } else {
-            getString(com.aminmart.pdftools.R.string.file_selected, count)
+            getString(R.string.file_selected, count)
         }
         binding.processButton.isEnabled = count >= 2
     }
@@ -100,99 +107,45 @@ class MergePdfActivity : AppCompatActivity() {
             Toast.makeText(this, "Please select at least 2 PDF files", Toast.LENGTH_SHORT).show()
             return
         }
+        if (viewModel.isRunning) return
 
-        val outputFilename = FileUtils.generateFilename("merged")
-        outputFile = File(FileUtils.getDownloadDir(this), outputFilename)
+        val outputFile = FileUtils.createOutputFile(this, FileUtils.generateFilename("merged"))
+        viewModel.outputFile = outputFile
 
-        showProgress(true)
-
-        lifecycleScope.launch {
-            mergePdfsFlow(files).collect { result ->
-                when (result) {
-                    is PdfOperationResult.Progress -> {
-                        binding.progressBar.progress = result.percent
-                        binding.progressTextView.text = result.message
-                    }
-                    is PdfOperationResult.Success -> {
-                        showProgress(false)
-                        showDownloadButton()
-                        Toast.makeText(
-                            this@MergePdfActivity,
-                            "PDFs merged successfully!",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    is PdfOperationResult.Error -> {
-                        showProgress(false)
-                        Toast.makeText(
-                            this@MergePdfActivity,
-                            result.message,
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-            }
-        }
+        viewModel.run(PdfUtils.mergePdfs(files, outputFile))
     }
 
-    private fun mergePdfsFlow(inputFiles: List<File>): Flow<PdfOperationResult> = flow {
-        try {
-            if (inputFiles.isEmpty()) {
-                emit(PdfOperationResult.Error("No files to merge"))
-                return@flow
-            }
-
-            emit(PdfOperationResult.Progress(10, "Starting merge process..."))
-            
-            val firstReader = com.lowagie.text.pdf.PdfReader(inputFiles[0].absolutePath)
-            val document = com.lowagie.text.Document(firstReader.getPageSizeWithRotation(1))
-            val copy = com.lowagie.text.pdf.PdfCopy(document, java.io.FileOutputStream(outputFile!!))
-            
-            document.open()
-            
-            var totalPages = 0
-            inputFiles.forEach { totalPages += PdfUtils.getPageCount(it) }
-            
-            var currentPage = 0
-            
-            inputFiles.forEachIndexed { fileIndex, file ->
-                emit(PdfOperationResult.Progress(
-                    20 + (fileIndex * 40 / inputFiles.size),
-                    "Processing file ${fileIndex + 1} of ${inputFiles.size}..."
-                ))
-                
-                val reader = com.lowagie.text.pdf.PdfReader(file.absolutePath)
-                val n = reader.numberOfPages
-                
-                for (i in 1..n) {
-                    currentPage++
-                    val percent = 60 + (currentPage * 35 / totalPages)
-                    emit(PdfOperationResult.Progress(percent, "Copying page $currentPage of $totalPages..."))
-                    
-                    copy.addPage(copy.getImportedPage(reader, i))
+    private fun observeOperation() {
+        viewModel.operationState.observe(this) { result ->
+            when (result) {
+                null -> Unit
+                is PdfOperationResult.Progress -> {
+                    showProgress(true)
+                    binding.progressBar.progress = result.percent
+                    binding.progressTextView.text = result.message
                 }
-                
-                reader.close()
+                is PdfOperationResult.Success -> {
+                    showProgress(false)
+                    showDownloadButton()
+                    if (!viewModel.resultNotified) {
+                        viewModel.resultNotified = true
+                        Toast.makeText(this, "PDFs merged successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                is PdfOperationResult.Error -> {
+                    showProgress(false)
+                    if (!viewModel.resultNotified) {
+                        viewModel.resultNotified = true
+                        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
             }
-            
-            emit(PdfOperationResult.Progress(95, "Finalizing merged document..."))
-            
-            document.close()
-            copy.close()
-            
-            emit(PdfOperationResult.Progress(100, "Merge complete!"))
-            
-            emit(PdfOperationResult.Success(outputFile!!))
-            
-        } catch (e: Exception) {
-            outputFile?.delete()
-            emit(PdfOperationResult.Error("Failed to merge PDFs: ${e.message}", e))
         }
     }
 
     private fun showProgress(show: Boolean) {
         binding.progressLayout.visibility = if (show) View.VISIBLE else View.GONE
-        binding.processButton.isEnabled = !show
+        binding.processButton.isEnabled = !show && adapter.itemCount >= 2
         binding.addFilesButton.isEnabled = !show
     }
 
@@ -201,41 +154,28 @@ class MergePdfActivity : AppCompatActivity() {
     }
 
     private fun downloadFile() {
-        val file = outputFile
+        val file = viewModel.outputFile
         if (file == null || !file.exists()) {
             Toast.makeText(this, "File not found", Toast.LENGTH_SHORT).show()
             return
         }
 
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                this,
-                "${packageName}.fileprovider",
-                file
-            )
+        val savedUri = FileUtils.saveToDownloads(this, file)
+        if (savedUri != null) {
+            Toast.makeText(this, "Saved to Downloads: ${file.name}", Toast.LENGTH_SHORT).show()
+        }
 
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+        try {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/pdf")
-                flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
             }
 
             startActivity(intent)
-
-            adapter.getFiles().forEach { pdfFile ->
-                FileUtils.deleteTempFile(this, pdfFile.file)
-            }
-
-            Toast.makeText(this, "File opened successfully", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Error opening file: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        adapter.getFiles().forEach { pdfFile ->
-            FileUtils.deleteTempFile(this, pdfFile.file)
         }
     }
 }
